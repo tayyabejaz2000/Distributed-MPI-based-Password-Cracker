@@ -138,6 +138,7 @@ int main(int argc, char **argv)
             auto hash = std::string_view(crypt(currentPasswd.data(), localData.setting));
             if (hash == localData.originalHash)
             {
+                ///TODO: Stops all other Jobs when 1 job finds password
                 out << "Found Password: " << currentPasswd << '\n';
                 break;
             }
