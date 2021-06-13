@@ -1,1 +1,0 @@
-mpic++ CMakeFiles/project.dir/src/main.cpp.o -o project  -lcrypt -lpthread 
