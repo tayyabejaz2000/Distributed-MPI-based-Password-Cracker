@@ -2,14 +2,25 @@
 
 #include <mpi.h>
 
+/*
+@brief A Struct containing information for a MPI Job used in brute-force cracking password 
+*/
 struct MPIJobData
 {
+    //Salt
     char setting[20] = {};
+    //Original Hash value from /etc/shadow
     char originalHash[200] = {};
 
+    //Brute-Force Starting password
     char startingPasswd[9] = {};
+    //Brute-Force Ending Password
     char endingPasswd[9] = {};
 
+    /*
+    @brief Returns custom MPI::Datatype of MPIJobData struct for use with MPI API Calls
+    @return MPI::Datatype for MPIJobData struct
+    */
     static inline MPI::Datatype MPIDataType()
     {
         int sizes[] = {
