@@ -1,4 +1,5 @@
 #include <bits/stdc++.h>
+
 #include <crypt.h>
 #include <mpi.h>
 
@@ -8,6 +9,11 @@
 
 using namespace std::literals;
 
+/*
+@brief Increments input string by 1 alphabet Only lower-case alphabetical string
+@param old Input String
+@return true if addition overflowed else false
+*/
 bool IncrementString(std::string &old)
 {
     bool carry = true;
@@ -23,7 +29,11 @@ bool IncrementString(std::string &old)
     }
     return carry ? false : true;
 }
-
+/*
+@brief Generates Uniformly distributed string
+@param size No of partitions
+@return Partitions
+*/
 std::vector<char[9]> GenerateUniformly(std::size_t size)
 {
     if (size > 26)
@@ -34,19 +44,27 @@ std::vector<char[9]> GenerateUniformly(std::size_t size)
     for (auto i = 0ul; i < size * partitionSize; i += partitionSize)
     {
         auto ch = static_cast<char>(i + 'a');
-        char partition[9] = {ch, ch, ch, ch, ch, ch, ch, ch, 0};
+        char partition[] = {ch, ch, ch, ch, ch, ch, ch, ch, 0};
         memcpy(*it, partition, 9);
         ++it;
     }
     return partitions;
 }
 
+/*
+@brief Reads /etc/shadow file, gets hash and Initializes Job Data for each MPI Job
+@param user The user to crack password for
+@param numProcs No of MPI Jobs
+@return All MPI Job Data
+*/
 std::vector<MPIJobData> Initialization(std::string user, uint numProcs)
 {
+    //Read File /etc/shadow containing passwords hash for all users
     auto passwdFile = std::ifstream("/etc/shadow");
     if (!passwdFile.is_open())
         throw std::runtime_error("Cannot Open Password File /etc/shadow");
 
+    ///Find the entry for user
     std::string userData;
     while (std::getline(passwdFile, userData))
         if (userData.find(user) != std::string::npos)
@@ -55,15 +73,19 @@ std::vector<MPIJobData> Initialization(std::string user, uint numProcs)
     if (passwdFile.eof())
         throw std::runtime_error("Could'nt find user: " + user);
 
+    //Get Password Hash for the user
     auto hash_start = userData.find(':') + 1;
     auto hash = userData.substr(hash_start, userData.find(':', hash_start) - hash_start);
 
+    //Get salt used for generating hash
     auto setting = hash.substr(0, hash.find_last_of('$'));
 
+    //Create equally distributed passwords for brute-forcing
     auto partitions = GenerateUniformly(numProcs);
 
     auto data = std::vector<MPIJobData>(numProcs);
 
+    //Create Data for each MPI Job
     for (auto i = 0u; i < numProcs; ++i)
     {
         std::copy(setting.begin(), setting.end(), data[i].setting);
@@ -83,6 +105,7 @@ std::vector<MPIJobData> Initialization(std::string user, uint numProcs)
 int main(int argc, char **argv)
 {
     std::stringstream out;
+    //Print bool as (true/false)
     out << std::boolalpha;
 
     MPI::Init(argc, argv);
@@ -94,28 +117,36 @@ int main(int argc, char **argv)
         auto data = std::vector<MPIJobData>();
         auto type = MPIJobData::MPIDataType();
 
+        //Only MASTER_RANK initializes data
+        //and scatters it to all ranks
         if (rank == MASTER_RANK)
             data = Initialization("mpiuser", size);
 
+        //Local data for each MPI Job
         MPIJobData localData;
+        //Scatter Data
         MPI::COMM_WORLD.Scatter(static_cast<void *>(data.data()), 1, type,
                                 static_cast<void *>(&localData), 1, type,
                                 MASTER_RANK);
 
         auto currentPasswd = std::string(localData.startingPasswd);
         auto endingPasswd = std::string(localData.endingPasswd);
+        //Brute force each password until found
         while (currentPasswd != endingPasswd)
         {
+            //Find Hash
             auto hash = std::string_view(crypt(currentPasswd.data(), localData.setting));
             if (hash == localData.originalHash)
             {
                 out << "Found Password: " << currentPasswd << '\n';
                 break;
             }
+            //Increment String by 1 alphabet (Only lower-case 8 letter string)
             IncrementString(currentPasswd);
         }
 
         MPI::Finalize();
     }
+    //Flush any local MPI Job data to stdout
     std::cout << out.str();
 }
