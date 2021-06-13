@@ -22,7 +22,7 @@ $ make
 $ sudo mpirun --allow-run-as-root -n {no of jobs} {binary}
 </code>
 <br>
-As the code reads /etc/shadow which has special permissions so it needs sudo permissions.
+As the code reads <code>/etc/shadow</code> which has special permissions so it needs sudo permissions.
 <br>
 <code>mpirun</code> doesnt alow to be run as root so <code>--allow-run-as-root</code> is required to run the binary normally.
 
