@@ -1,6 +1,6 @@
 # Distributed-MPI-based-Password-Cracker
 
-A Simple Brute Force distributed based password cracker using MPI
+A Simple Brute Force based distributed password cracker using MPI
 
 # Build
 
