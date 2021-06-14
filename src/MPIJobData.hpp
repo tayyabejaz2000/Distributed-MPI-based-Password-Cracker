@@ -7,7 +7,7 @@
 */
 struct MPIJobData
 {
-    //Salt
+    //Encyption Method + Salt
     char setting[20] = {};
     //Original Hash value from /etc/shadow
     char originalHash[200] = {};
