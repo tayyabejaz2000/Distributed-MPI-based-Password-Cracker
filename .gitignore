@@ -9,3 +9,9 @@ cmake_install.cmake
 
 #Makefile
 Makefile
+
+#otherfiles
+src/a.out
+src/tests.cpp
+*.txt
+

@@ -2,6 +2,7 @@
 
 #include <crypt.h>
 #include <mpi.h>
+#include <iostream>
 
 #include "MPIJobData.hpp"
 
@@ -18,15 +19,23 @@ bool IncrementString(std::string &old)
 {
     bool carry = true;
     auto it = old.rbegin();
+    uint count = old.length();
+
     while (carry && it != old.rend())
     {
         *it += 1;
-        if (*it > 'z')
+        if (*it > 'z'){
             carry = true, *it = 'a';
+            count--;
+        }
         else
             carry = false;
         ++it;
     }
+    if(count == 0)
+        old += 'a';
+
+
     return carry ? false : true;
 }
 /*
@@ -34,18 +43,18 @@ bool IncrementString(std::string &old)
 @param size No of partitions
 @return Partitions
 */
-std::vector<char[9]> GenerateUniformly(std::size_t size)
+std::vector<char[2]> GenerateUniformly(std::size_t size)
 {
     if (size > 26)
         throw std::runtime_error("Size is greater than 26");
     auto partitionSize = 26 / size;
-    auto partitions = std::vector<char[9]>(size);
+    auto partitions = std::vector<char[2]>(size);
     auto it = partitions.begin();
     for (auto i = 0ul; i < size * partitionSize; i += partitionSize)
     {
         auto ch = static_cast<char>(i + 'a');
-        char partition[] = {ch, ch, ch, ch, ch, ch, ch, ch, 0};
-        memcpy(*it, partition, 9);
+        char partition[] = {ch, 0};
+        memcpy(*it, partition, 2);
         ++it;
     }
     return partitions;
@@ -136,13 +145,17 @@ int main(int argc, char **argv)
         {
             //Find Hash
             auto hash = std::string_view(crypt(currentPasswd.data(), localData.setting));
+            
+            
+            std::cout << currentPasswd.data() << "\n";
+
             if (hash == localData.originalHash)
             {
                 ///TODO: Stops all other Jobs when 1 job finds password
                 out << "Found Password: " << currentPasswd << '\n';
                 break;
             }
-            //Increment String by 1 alphabet (Only lower-case 8 letter string)
+            //Increment String by 1 alphabet (Only lower-case <= 8 letter string)
             IncrementString(currentPasswd);
         }
 
