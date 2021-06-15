@@ -10,8 +10,9 @@ cmake_install.cmake
 #Makefile
 Makefile
 
-#otherfiles
+#Other Files
 src/a.out
 src/tests.cpp
+project
 *.txt
 
