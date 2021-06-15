@@ -7,6 +7,7 @@ set(CXX_STANDARD "c++17")
 add_compile_options(
     -fno-diagnostics-show-option -fstack-protector-all
     -g -O2 -std=c++17 
+    -fopenmp
     #-Wall -Wfatal-errors
     -Wextra -Wpedantic -Walloc-zero -Walloca
     -Wctor-dtor-privacy -Wduplicated-cond -Wduplicated-branches

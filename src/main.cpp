@@ -1,8 +1,9 @@
 #include <bits/stdc++.h>
 
-#include <crypt.h>
 #include <mpi.h>
-#include <iostream>
+#include <omp.h>
+
+#include <crypt.h>
 
 #include "MPIJobData.hpp"
 
@@ -10,53 +11,75 @@
 
 using namespace std::literals;
 
+namespace
+{
+    std::stringstream out;
+}
+
 /*
 @brief Increments input string by 1 alphabet Only lower-case alphabetical string
 @param old Input String
-@return true if addition overflowed else false
+@return true if addition overflowed else false i.e. the string size was increased
 */
 bool IncrementString(std::string &old)
 {
-    bool carry = true;
+    auto carry = true;
     auto it = old.rbegin();
-    uint count = old.length();
-
     while (carry && it != old.rend())
     {
-        *it += 1;
-        if (*it > 'z'){
+        ++(*it);
+        if (*it > 'z')
             carry = true, *it = 'a';
-            count--;
-        }
         else
             carry = false;
         ++it;
     }
-    if(count == 0)
-        old += 'a';
-
-
-    return carry ? false : true;
+    if (carry)
+        old.insert(old.begin(), 'a');
+    return carry;
 }
+
 /*
-@brief Generates Uniformly distributed string
+@brief Convertes Base-10 integer to baseN alphabet string
+@param base10 Base-10 Integer
+@param baseN Base to convert to (Default 26)
+@return The resulting baseN string
+*/
+std::string GetAlphabetBaseNString(uint64_t base10, uint8_t baseN = 26u)
+{
+    if (baseN > 26)
+        throw std::runtime_error("Alphabetical Number system have max base of 26");
+    std::string value;
+    while (base10 < static_cast<uint64_t>(-1))
+    {
+        auto mod = static_cast<char>((base10 % baseN) + 'a');
+        base10 = (base10 / baseN) - 1;
+        value.push_back(mod);
+    }
+    return std::string(value.rbegin(), value.rend());
+}
+
+/*
+@brief Generates same sized (size) Partitions
 @param size No of partitions
 @return Partitions
 */
-std::vector<char[2]> GenerateUniformly(std::size_t size)
+std::vector<std::pair<uint64_t, uint64_t>> GetPartitions(std::size_t size)
 {
-    if (size > 26)
-        throw std::runtime_error("Size is greater than 26");
-    auto partitionSize = 26 / size;
-    auto partitions = std::vector<char[2]>(size);
-    auto it = partitions.begin();
-    for (auto i = 0ul; i < size * partitionSize; i += partitionSize)
-    {
-        auto ch = static_cast<char>(i + 'a');
-        char partition[] = {ch, 0};
-        memcpy(*it, partition, 2);
-        ++it;
-    }
+    static const auto max = static_cast<uint64_t>(std::pow(26, 8) +
+                                                  std::pow(26, 7) +
+                                                  std::pow(26, 6) +
+                                                  std::pow(26, 5) +
+                                                  std::pow(26, 4) +
+                                                  std::pow(26, 3) +
+                                                  std::pow(26, 2) +
+                                                  std::pow(25, 1));
+    auto partitionSize = max / size;
+    auto partitions = std::vector<std::pair<uint64_t, uint64_t>>((max % size) == 0 ? size : size + 1);
+    auto i = 0ul;
+    for (auto &partition : partitions)
+        partition = {i, std::clamp(i + partitionSize, 0ul, max)},
+        i += partitionSize;
     return partitions;
 }
 
@@ -90,38 +113,98 @@ std::vector<MPIJobData> Initialization(std::string user, uint numProcs)
     auto setting = hash.substr(0, hash.find_last_of('$'));
 
     //Create equally distributed passwords for brute-forcing
-    auto partitions = GenerateUniformly(numProcs);
+    auto partitions = GetPartitions(numProcs);
 
-    auto data = std::vector<MPIJobData>(numProcs);
+    auto jobs = std::vector<MPIJobData>();
+    auto job = MPIJobData{};
 
     //Create Data for each MPI Job
-    for (auto i = 0u; i < numProcs; ++i)
+    for (auto &&[start, end] : partitions)
     {
-        std::copy(setting.begin(), setting.end(), data[i].setting);
-        std::copy(hash.begin(), hash.end(), data[i].originalHash);
-        std::copy(partitions[i], partitions[i] + 9, data[i].startingPasswd);
-        if (i != numProcs - 1)
-            std::copy(partitions[i + 1], partitions[i + 1] + 9, data[i].endingPasswd);
-        else
-        {
-            auto endingPasswd = "zzzzzzzz"sv;
-            std::copy(endingPasswd.begin(), endingPasswd.end(), data[i].endingPasswd);
-        }
+        std::copy(setting.begin(), setting.end(), job.setting);
+        std::copy(hash.begin(), hash.end(), job.originalHash);
+        auto startPasswd = GetAlphabetBaseNString(start, 26);
+        std::copy(startPasswd.begin(), startPasswd.end(), job.startingPasswd);
+        auto endingPasswd = GetAlphabetBaseNString(end, 26);
+        std::copy(endingPasswd.begin(), endingPasswd.end(), job.endingPasswd);
+        jobs.push_back(job);
     }
-    return data;
+
+    return jobs;
 }
 
+///TODO: Add Documentation
+void Bruteforce(const MPIJobData &data, uint16_t rank, uint16_t size)
+{
+    auto stop = false;
+#pragma omp parallel num_threads(2) shared(stop)
+    {
+        auto num_thread = omp_get_thread_num();
+        if (num_thread == 0)
+        {
+            auto currentPasswd = std::string(data.startingPasswd);
+            auto endingPasswd = std::string(data.endingPasswd);
+            //Brute force each password until found
+            while (currentPasswd != endingPasswd && !stop)
+            {
+                //Find Hash
+                auto hash = std::string_view(crypt(currentPasswd.data(), data.setting));
+                if (hash == data.originalHash)
+                {
+                    out << "Found Password: " << currentPasswd << '\n';
+                    stop = true;
+                    break;
+                }
+                //Increment String by 1 alphabet
+                IncrementString(currentPasswd);
+            }
+            //Tell MASTER_RANK this job is terminating
+            MPI::COMM_WORLD.Send(&stop, 1, MPI::BOOL, MASTER_RANK, MPI::ANY_TAG);
+        }
+        else if (num_thread == 1)
+        {
+            auto check = false;
+            if (rank == MASTER_RANK)
+            {
+                //Num of processes message recieved from
+                auto numProcs = 0u;
+                while (!stop && numProcs < size)
+                {
+                    MPI::COMM_WORLD.Recv(static_cast<void *>(&check), 1, MPI::BOOL, MPI::ANY_SOURCE, MPI::ANY_TAG);
+                    stop = check;
+                    numProcs++;
+                }
+                //Tell all processes to stop
+                stop = true;
+                for (auto i = 0; i < size; ++i)
+                {
+                    if (i == MASTER_RANK)
+                        continue;
+                    MPI::COMM_WORLD.Send(static_cast<void *>(&stop), 1, MPI::BOOL, i, MPI::ANY_TAG);
+                }
+            }
+            else
+            {
+                while (!stop)
+                {
+                    MPI::COMM_WORLD.Recv(static_cast<void *>(&check), 1, MPI::BOOL, MPI::ANY_SOURCE, MPI::ANY_TAG);
+                    stop = check;
+                }
+                out << "Rank: " << rank << " Terminating, Password not found.\n";
+            }
+        }
+    }
+}
 int main(int argc, char **argv)
 {
-    std::stringstream out;
     //Print bool as (true/false)
     out << std::boolalpha;
 
     MPI::Init(argc, argv);
     if (MPI::Is_initialized())
     {
-        auto size = MPI::COMM_WORLD.Get_size();
-        auto rank = MPI::COMM_WORLD.Get_rank();
+        auto size = static_cast<uint32_t>(MPI::COMM_WORLD.Get_size());
+        auto rank = static_cast<uint32_t>(MPI::COMM_WORLD.Get_rank());
 
         auto data = std::vector<MPIJobData>();
         auto type = MPIJobData::MPIDataType();
@@ -133,32 +216,28 @@ int main(int argc, char **argv)
 
         //Local data for each MPI Job
         MPIJobData localData;
+
         //Scatter Data
-        MPI::COMM_WORLD.Scatter(static_cast<void *>(data.data()), 1, type,
-                                static_cast<void *>(&localData), 1, type,
-                                MASTER_RANK);
-
-        auto currentPasswd = std::string(localData.startingPasswd);
-        auto endingPasswd = std::string(localData.endingPasswd);
-        //Brute force each password until found
-        while (currentPasswd != endingPasswd)
+        for (auto i = 0u; i < size; ++i)
         {
-            //Find Hash
-            auto hash = std::string_view(crypt(currentPasswd.data(), localData.setting));
-            
-            
-            std::cout << currentPasswd.data() << "\n";
-
-            if (hash == localData.originalHash)
-            {
-                ///TODO: Stops all other Jobs when 1 job finds password
-                out << "Found Password: " << currentPasswd << '\n';
-                break;
-            }
-            //Increment String by 1 alphabet (Only lower-case <= 8 letter string)
-            IncrementString(currentPasswd);
+            if (i == MASTER_RANK)
+                continue;
+            else if (rank == MASTER_RANK)
+                MPI::COMM_WORLD.Send(&data[i], 1, type, i, MPI::ANY_TAG);
+            else
+                MPI::COMM_WORLD.Recv(&localData, 1, type, MPI::ANY_SOURCE, MPI::ANY_TAG);
         }
 
+        if (rank == MASTER_RANK)
+        {
+            if (size < data.size())
+            {
+                localData = data.back();
+                Bruteforce(localData, rank, size);
+            }
+        }
+        else
+            Bruteforce(localData, rank, size);
         MPI::Finalize();
     }
     //Flush any local MPI Job data to stdout
