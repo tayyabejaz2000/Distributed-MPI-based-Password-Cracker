@@ -1,7 +1,7 @@
 #include <bits/stdc++.h>
 
-#include <mpi.h>
 #include <omp.h>
+#include <mpi.h>
 
 #include <crypt.h>
 
@@ -98,7 +98,7 @@ std::vector<std::pair<uint64_t, uint64_t>> GetPartitions(std::size_t size)
 std::vector<MPIJobData> Initialization(std::string user, uint numProcs)
 {
     //Read File /etc/shadow containing passwords hash for all users
-    auto passwdFile = std::ifstream("/etc/shadow");
+    auto passwdFile = std::ifstream("shadow");
     if (!passwdFile.is_open())
         throw std::runtime_error("Cannot Open Password File /etc/shadow");
 
@@ -114,9 +114,10 @@ std::vector<MPIJobData> Initialization(std::string user, uint numProcs)
     //Get Password Hash for the user
     auto hash_start = userData.find(':') + 1;
     auto hash = userData.substr(hash_start, userData.find(':', hash_start) - hash_start);
-
     //Get salt used for generating hash
     auto setting = hash.substr(0, hash.find_last_of('$'));
+
+    out << "Hash: " << hash << "\nSetting: " << setting << '\n';
 
     //Create equally distributed passwords for brute-forcing
     auto partitions = GetPartitions(numProcs - 1);
@@ -136,23 +137,25 @@ std::vector<MPIJobData> Initialization(std::string user, uint numProcs)
         jobs.push_back(job);
     }
 
+    FlushOutput();
+
     return jobs;
 }
 
 ///TODO: Add Documentation
 void Bruteforce(const MPIJobData &data, uint16_t rank, uint16_t size)
 {
-
     auto stop = false;
 #pragma omp parallel num_threads(2) shared(stop)
     {
         auto num_thread = omp_get_thread_num();
         if (num_thread == 0)
         {
-            out << "Starting Job: " + std::to_string(rank) + '\n';
+            out << "Starting Job: " << rank << '\n';
             FlushOutput();
             auto currentPasswd = std::string(data.startingPasswd);
             auto endingPasswd = std::string(data.endingPasswd);
+
             //Brute force each password until found
             while (currentPasswd != endingPasswd && !stop)
             {
@@ -174,12 +177,19 @@ void Bruteforce(const MPIJobData &data, uint16_t rank, uint16_t size)
         }
         else if (num_thread == 1)
         {
-            for (auto i = 0; (i < size) && (!stop); ++i)
-                MPI::COMM_WORLD.Recv(static_cast<void *>(&stop), 1, MPI::BOOL, MPI::ANY_SOURCE, 0);
+            auto check = stop;
+            for (auto i = 0; (i < size) && (!check); ++i)
+            {
+                MPI::COMM_WORLD.Recv(static_cast<void *>(&check), 1, MPI::BOOL, MPI::ANY_SOURCE, 0);
+                if (stop)
+                    break;
+                stop = check;
+            }
             out << "Terminating Event Listener, Rank: " << rank << '\n';
         }
     }
 }
+
 int main(int argc, char **argv)
 {
     //Print bool as (true/false)
@@ -221,6 +231,10 @@ int main(int argc, char **argv)
             Bruteforce(*it, rank, size);
         else if (rank != MASTER_RANK)
             Bruteforce(localData, rank, size);
+
+        MPI::COMM_WORLD.Barrier();
+        FlushOutput();
+
         MPI::Finalize();
     }
     //Flush any local MPI Job data to stdout
